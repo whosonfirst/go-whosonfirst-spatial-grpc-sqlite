@@ -3,19 +3,19 @@ syntax = "proto3";
 // https://blog.golang.org/protobuf-apiv2
 
 service Spatial {
-	rpc PointInPolygon (Coordinate) returns (StandardPlacesResults) {}
-	rpc PointInPolygonStream (Coordinate) returns (stream StandardPlaceResponse) {}	
-}
-
-message Coordinate {
-	float latitude = 1;
-	float longitude = 2;
+	rpc PointInPolygon (PointInPolygonRequest) returns (StandardPlacesResults) {}
+	rpc PointInPolygonStream (PointInPolygonRequest) returns (stream StandardPlaceResponse) {}	
 }
 
 enum ExistentialFlag {
      FALSE = 0;
      TRUE = 1;
      UNKNOWN = -1;     
+}
+
+message PointInPolygonRequest {
+	float latitude = 1;
+	float longitude = 2;
 }
 
 message StandardPlaceResponse {

@@ -101,11 +101,15 @@ github.com/whosonfirst/go-whosonfirst-spatial/flags
 github.com/whosonfirst/go-whosonfirst-spatial/geo
 github.com/whosonfirst/go-whosonfirst-spatial/properties
 github.com/whosonfirst/go-whosonfirst-spatial/timer
-# github.com/whosonfirst/go-whosonfirst-spatial-grpc v0.0.0-20210324154954-2b9b2b172d39
+# github.com/whosonfirst/go-whosonfirst-spatial-grpc v0.0.1
+## explicit
 github.com/whosonfirst/go-whosonfirst-spatial-grpc/flags
 github.com/whosonfirst/go-whosonfirst-spatial-grpc/server
 github.com/whosonfirst/go-whosonfirst-spatial-grpc/spatial
+# github.com/whosonfirst/go-whosonfirst-spatial-pip v0.0.5
+github.com/whosonfirst/go-whosonfirst-spatial-pip
 # github.com/whosonfirst/go-whosonfirst-spatial-sqlite v0.0.34
+## explicit
 github.com/whosonfirst/go-whosonfirst-spatial-sqlite
 # github.com/whosonfirst/go-whosonfirst-spr/v2 v2.0.0
 github.com/whosonfirst/go-whosonfirst-spr/v2
