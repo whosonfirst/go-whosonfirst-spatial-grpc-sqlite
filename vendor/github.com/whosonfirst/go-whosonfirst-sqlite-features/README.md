@@ -49,21 +49,45 @@ CREATE INDEX ancestors_by_lastmod ON concordances (lastmodified);`
 
 ```
 CREATE TABLE geojson (
-	id INTEGER NOT NULL PRIMARY KEY,
+	id INTEGER NOT NULL,
 	body TEXT,
+	source TEXT,
+	is_alt BOOLEAN,
+	alt_label TEXT,
 	lastmodified INTEGER
 );
 
-CREATE INDEX geojson_by_lastmod ON geojson (lastmodified);
+CREATE UNIQUE INDEX geojson_by_id ON %s (id, source, alt_label);
+CREATE INDEX geojson_by_alt ON %s (id, is_alt, alt_label);
+CREATE INDEX geojson_by_lastmod ON %s (lastmodified);
 ```
+
+### geometry
+
+```
+CREATE TABLE geometry (
+	id INTEGER NOT NULL,
+	body TEXT,
+	is_alt BOOLEAN,
+	alt_label TEXT,
+	lastmodified INTEGER
+);
+
+CREATE UNIQUE INDEX geojson_by_id ON %s (id, alt_label);
+CREATE INDEX geojson_by_alt ON %s (id, is_alt, alt_label);
+CREATE INDEX geojson_by_lastmod ON %s (lastmodified);
+```
+
+This table indexes only the `geometry` elements for Who's On First records. This table is principally used in concert with the `rtree` for performance reasons.
 
 ### geometries
 
 ```
 CREATE TABLE geometries (
-	id INTEGER NOT NULL PRIMARY KEY,
-	is_alt TINYINT,
+	id INTEGER NOT NULL,
 	type TEXT,
+	is_alt TINYINT,
+	alt_label TEXT,
 	lastmodified INTEGER
 );
 
@@ -71,6 +95,7 @@ SELECT InitSpatialMetaData();
 SELECT AddGeometryColumn('geometries', 'geom', 4326, 'GEOMETRY', 'XY');
 SELECT CreateSpatialIndex('geometries', 'geom');
 
+CREATE UNIQUE INDEX by_id ON geometries (id, alt_label);
 CREATE INDEX geometries_by_lastmod ON geometries (lastmodified);`
 ```
 
@@ -106,18 +131,39 @@ CREATE INDEX names_by_name_private ON names (name, privateuse, placetype, countr
 CREATE INDEX names_by_wofid ON names (id);
 ```
 
+### properties
+
+```
+CREATE TABLE properties (
+	id INTEGER NOT NULL,
+	body TEXT,
+	is_alt BOOLEAN,
+	alt_label TEXT,
+	lastmodified INTEGER
+);
+
+CREATE UNIQUE INDEX geojson_by_id ON %s (id, alt_label);
+CREATE INDEX geojson_by_alt ON %s (id, is_alt, alt_label);
+CREATE INDEX geojson_by_lastmod ON %s (lastmodified);
+```
+
+This table indexes only the `properties` elements for Who's On First records. This table is principally used in concert with the `rtree` for performance reasons.
+
 ### rtree
 
 ```
 CREATE VIRTUAL TABLE %s USING rtree (
-		id,
-		min_x,
-		min_y,
-		max_x,
-		max_y,
-		is_alt,
-		lastmodified
-	);
+	id,
+	min_x,
+	max_x,
+	min_y,
+	max_y,
+	+wof_id INTEGER,
+	+is_alt TINYINT,
+	+alt_label TEXT,
+	+geometry BLOB,	
+	+lastmodified INTEGER
+);
 ```
 
 #### Notes
@@ -126,13 +172,13 @@ Section `3.1.1` of the [SQLite RTree documentation](https://www.sqlite.org/rtree
 
 > In the argments to "rtree" in the CREATE VIRTUAL TABLE statement, the names of the columns are taken from the first token of each argument. All subsequent tokens within each argument are silently ignored. This means, for example, that if you try to give a column a type affinity or add a constraint such as UNIQUE or NOT NULL or DEFAULT to a column, those extra tokens are accepted as valid, but they do not change the behavior of the rtree. In an RTREE virtual table, the first column always has a type affinity of INTEGER and all other data columns have a type affinity of NUMERIC. Recommended practice is to omit any extra tokens in the rtree specification. Let each argument to "rtree" be a single ordinary label that is the name of the corresponding column, and omit all other tokens from the argument list.
 
-For example, a given row in the `rtree` table looks like this:
+Section `4.1` goes on to say:
 
-```
-1477856011|-122.387908935547|37.6149787902832|-122.384384155273|37.6177368164062|0.0|1568838528.0
-```
+> Beginning with SQLite version 3.24.0 (2018-06-04), r-tree tables can have auxiliary columns that store arbitrary data. ... Auxiliary columns are marked with a "+" symbol before the column name. Auxiliary columns must come after all of the coordinate boundary columns. There is a limit of no more than 100 auxiliary columns.
 
-As of this writing you _should not try to index alternate geometries_ in the `rtree` table. Pending a decision about how and where to store (and query) alternate geometry labels, and how to reconcile them with the unique ID constraint, there is no mechanism to prevent the last feature in a set of primary and alternate geometries from being indexed.
+With that in mind the `rtree` table relies on SQLite to automatically generate a new primary key value for the `id` column. The Who's On First record's ID is _not_ the primary key for the table and is stored in the `wof_id` column. It may be associated with (1) primary record and (n) alternate geometry records. If an alternate geometry is indexed the `is_alt` column value will be set to "1" and the `alt_label` column will be populated with the value in that record's `src:alt_label` property.
+
+The `+geometry` column contains each polygons rings JSON-encoded as `[][][]float64`.
 
 ### search
 
@@ -167,6 +213,8 @@ CREATE TABLE spr (
 	is_superseding INTEGER,
 	superseded_by TEXT,
 	supersedes TEXT,
+	is_alt TINYINT,
+	alt_label TEXT,	
 	lastmodified INTEGER
 );
 
@@ -184,6 +232,19 @@ CREATE INDEX spr_by_ceased ON spr (is_ceased, lastmodified);
 CREATE INDEX spr_by_superseded ON spr (is_superseded, lastmodified);
 CREATE INDEX spr_by_superseding ON spr (is_superseding, lastmodified);
 CREATE INDEX spr_obsolete ON spr (is_deprecated, is_superseded);
+```
+
+### supersedes
+
+```
+CREATE TABLE %s (
+	id INTEGER NOT NULL,
+	superseded_id INTEGER NOT NULL,
+	superseded_by_id INTEGER NOT NULL,
+	lastmodified INTEGER
+);
+
+CREATE UNIQUE INDEX supersedes_by ON %s (id,superseded_id, superseded_by_id);
 ```
 
 ## Custom tables

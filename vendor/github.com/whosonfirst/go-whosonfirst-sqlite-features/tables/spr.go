@@ -1,47 +1,70 @@
 package tables
 
 import (
+	"errors"
 	"fmt"
 	"github.com/whosonfirst/go-whosonfirst-geojson-v2"
 	"github.com/whosonfirst/go-whosonfirst-geojson-v2/properties/whosonfirst"
 	"github.com/whosonfirst/go-whosonfirst-sqlite"
 	"github.com/whosonfirst/go-whosonfirst-sqlite-features"
 	"github.com/whosonfirst/go-whosonfirst-sqlite/utils"
+	_ "log"
 )
+
+type SPRTableOptions struct {
+	IndexAltFiles bool
+}
+
+func DefaultSPRTableOptions() (*SPRTableOptions, error) {
+
+	opts := SPRTableOptions{
+		IndexAltFiles: false,
+	}
+
+	return &opts, nil
+}
 
 type SPRTable struct {
 	features.FeatureTable
-	name string
+	name    string
+	options *SPRTableOptions
 }
 
-type SPRRow struct {
-	Id            int64   // properties.wof:id	INTEGER
-	ParentId      int64   // properties.wof:parent_id	INTEGER
-	Name          string  // properties.wof:name  TEXT
-	Placetype     string  // properties.wof:placetype TEXT
-	Country       string  // properties.wof:country TEXT
-	Repo          string  // properties.wof:repo TEXT
-	Path          string  // derived TEXT
-	URI           string  // derived TEXT
-	Latitude      float64 // derived REAL
-	Longitude     float64 // derived REAL
-	MinLatitude   float64 // properties.geom:bbox.1 REAL
-	MinLongitude  float64 // properties.geom:bbox.0 REAL
-	MaxLatitude   float64 // properties.geom:bbox.3 REAL
-	MaxLongitude  float64 // properties.geom.bbox.2 REAL
-	IsCurrent     int64   // properies.mz:is_current INTEGER
-	IsCeased      int64   // derived INTEGER
-	IsDeprecated  int64   // derived INTEGER
-	IsSuperseded  int64   // derived INTEGER
-	IsSuperseding int64   // derived INTEGER
-	SupersededBy  []int64 // ...
-	Supersedes    []int64 // ...
-	LastModified  int64   // properties.wof:lastmodified INTEGER
+func NewSPRTable() (sqlite.Table, error) {
+
+	opts, err := DefaultSPRTableOptions()
+
+	if err != nil {
+		return nil, err
+	}
+
+	return NewSPRTableWithOptions(opts)
+}
+
+func NewSPRTableWithOptions(opts *SPRTableOptions) (sqlite.Table, error) {
+
+	t := SPRTable{
+		name:    "spr",
+		options: opts,
+	}
+
+	return &t, nil
 }
 
 func NewSPRTableWithDatabase(db sqlite.Database) (sqlite.Table, error) {
 
-	t, err := NewSPRTable()
+	opts, err := DefaultSPRTableOptions()
+
+	if err != nil {
+		return nil, err
+	}
+
+	return NewSPRTableWithDatabaseAndOptions(db, opts)
+}
+
+func NewSPRTableWithDatabaseAndOptions(db sqlite.Database, opts *SPRTableOptions) (sqlite.Table, error) {
+
+	t, err := NewSPRTableWithOptions(opts)
 
 	if err != nil {
 		return nil, err
@@ -56,15 +79,6 @@ func NewSPRTableWithDatabase(db sqlite.Database) (sqlite.Table, error) {
 	return t, nil
 }
 
-func NewSPRTable() (sqlite.Table, error) {
-
-	t := SPRTable{
-		name: "spr",
-	}
-
-	return &t, nil
-}
-
 func (t *SPRTable) InitializeTable(db sqlite.Database) error {
 
 	return utils.CreateTableIfNecessary(db, t)
@@ -77,10 +91,12 @@ func (t *SPRTable) Name() string {
 func (t *SPRTable) Schema() string {
 
 	sql := `CREATE TABLE %[1]s (
-			id INTEGER NOT NULL PRIMARY KEY,
+			id INTEGER NOT NULL,
 			parent_id INTEGER,
 			name TEXT,
 			placetype TEXT,
+			inception TEXT,
+			cessation TEXT,
 			country TEXT,
 			repo TEXT,
 			latitude REAL,
@@ -96,9 +112,12 @@ func (t *SPRTable) Schema() string {
 			is_superseding INTEGER,
 			superseded_by TEXT,
 			supersedes TEXT,
+			is_alt TINYINT,
+			alt_label TEXT,
 			lastmodified INTEGER
 	);
 
+	CREATE UNIQUE INDEX spr_by_id ON %[1]s (id, alt_label);
 	CREATE INDEX spr_by_lastmod ON %[1]s (lastmodified);
 	CREATE INDEX spr_by_parent ON %[1]s (parent_id, is_current, lastmodified);
 	CREATE INDEX spr_by_placetype ON %[1]s (placetype, is_current, lastmodified);
@@ -125,9 +144,17 @@ func (t *SPRTable) IndexRecord(db sqlite.Database, i interface{}) error {
 func (t *SPRTable) IndexFeature(db sqlite.Database, f geojson.Feature) error {
 
 	is_alt := whosonfirst.IsAlt(f)
+	alt_label := whosonfirst.AltLabel(f)
 
 	if is_alt {
-		return nil
+
+		if !t.options.IndexAltFiles {
+			return nil
+		}
+
+		if alt_label == "" {
+			return errors.New("Missing wof:alt_label property")
+		}
 	}
 
 	spr, err := f.SPR()
@@ -138,6 +165,7 @@ func (t *SPRTable) IndexFeature(db sqlite.Database, f geojson.Feature) error {
 
 	sql := fmt.Sprintf(`INSERT OR REPLACE INTO %s (
 		id, parent_id, name, placetype,
+		inception, cessation,
 		country, repo,
 		latitude, longitude,
 		min_latitude, min_longitude,
@@ -145,6 +173,7 @@ func (t *SPRTable) IndexFeature(db sqlite.Database, f geojson.Feature) error {
 		is_current, is_deprecated, is_ceased,
 		is_superseded, is_superseding,
 		superseded_by, supersedes,
+		is_alt, alt_label,
 		lastmodified
 		) VALUES (
 		?, ?, ?, ?,
@@ -152,7 +181,9 @@ func (t *SPRTable) IndexFeature(db sqlite.Database, f geojson.Feature) error {
 		?, ?,
 		?, ?,
 		?, ?,
+		?, ?,
 		?, ?, ?,
+		?, ?,
 		?, ?,
 		?, ?,
 		?
@@ -160,6 +191,7 @@ func (t *SPRTable) IndexFeature(db sqlite.Database, f geojson.Feature) error {
 
 	args := []interface{}{
 		spr.Id(), spr.ParentId(), spr.Name(), spr.Placetype(),
+		spr.Inception().String(), spr.Cessation().String(),
 		spr.Country(), spr.Repo(),
 		spr.Latitude(), spr.Longitude(),
 		spr.MinLatitude(), spr.MinLongitude(),
@@ -167,6 +199,7 @@ func (t *SPRTable) IndexFeature(db sqlite.Database, f geojson.Feature) error {
 		spr.IsCurrent().Flag(), spr.IsDeprecated().Flag(), spr.IsCeased().Flag(),
 		spr.IsSuperseded().Flag(), spr.IsSuperseding().Flag(),
 		"", "",
+		is_alt, alt_label,
 		spr.LastModified(),
 	}
 

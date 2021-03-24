@@ -1,53 +1,40 @@
 package flags
 
 import (
-	"errors"
 	"flag"
 	"fmt"
-	"github.com/whosonfirst/go-whosonfirst-index"
+	"github.com/sfomuseum/go-flags/flagset"
+	"github.com/sfomuseum/go-flags/lookup"
 	"github.com/whosonfirst/go-whosonfirst-spatial/database"
 	"github.com/whosonfirst/go-whosonfirst-spatial/properties"
-	"sort"
-	"strings"
 )
 
 func CommonFlags() (*flag.FlagSet, error) {
 
-	fs := NewFlagSet("common")
+	fs := flagset.NewFlagSet("common")
 
 	// spatial databases
 
 	available_databases := database.Schemes()
 	desc_databases := fmt.Sprintf("Valid options are: %s", available_databases)
 
-	fs.String("spatial-database-uri", "rtree://", desc_databases)
+	fs.String(SPATIAL_DATABASE_URI, "rtree://", desc_databases)
+
+	fs.Bool("is-wof", true, "Input data is WOF-flavoured GeoJSON. (Pass a value of '0' or 'false' if you need to index non-WOF documents.")
 
 	// property readers
 
-	fs.Bool("enable-properties", false, "Enable support for 'properties' parameters in queries.")
+	fs.Bool(ENABLE_PROPERTIES, false, "Enable support for 'properties' parameters in queries.")
+	fs.Bool(INDEX_PROPERTIES, false, "Index properties reader.")
 
 	available_property_readers := properties.Schemes()
 	desc_property_readers := fmt.Sprintf("Valid options are: %s", available_property_readers)
 
-	fs.String("properties-reader-uri", "", desc_property_readers)
+	fs.String(PROPERTIES_READER_URI, "rtree://", desc_property_readers)
 
-	// indexing modes
-
-	modes := index.Modes()
-	sort.Strings(modes)
-
-	valid_modes := strings.Join(modes, ", ")
-	desc_modes := fmt.Sprintf("Valid modes are: %s.", valid_modes)
-
-	fs.String("mode", "repo://", desc_modes)
-
-	//
-
-	fs.Bool("is-wof", true, "Input data is WOF-flavoured GeoJSON. (Pass a value of '0' or 'false' if you need to index non-WOF documents.")
-
-	fs.Bool("enable-custom-placetypes", false, "...")
-	fs.String("custom-placetypes-source", "", "...")
-	fs.String("custom-placetypes", "", "...")
+	fs.Bool(ENABLE_CUSTOM_PLACETYPES, false, "...")
+	fs.String(CUSTOM_PLACETYPES_SOURCE, "", "...")
+	fs.String(CUSTOM_PLACETYPES, "", "...")
 
 	// this is invoked/used in app/indexer.go but for the life of me I can't
 	// figure out how to make the code in flags/exclude.go implement the
@@ -57,33 +44,26 @@ func CommonFlags() (*flag.FlagSet, error) {
 	// (20180301/thisisaaronland)
 
 	var exclude Exclude
-	fs.Var(&exclude, "exclude", "Exclude (WOF) records based on their existential flags. Valid options are: ceased, deprecated, not-current, superseded.")
+	fs.Var(&exclude, EXCLUDE, "Exclude (WOF) records based on their existential flags. Valid options are: ceased, deprecated, not-current, superseded.")
 
-	fs.Bool("setenv", false, "Set flags from environment variables.")
-	fs.Bool("verbose", false, "Be chatty.")
+	fs.Bool(VERBOSE, false, "Be chatty.")
 
 	return fs, nil
 }
 
 func ValidateCommonFlags(fs *flag.FlagSet) error {
 
-	_, err := StringVar(fs, "mode")
-
-	if err != nil {
-		return err
-	}
-
-	spatial_database_uri, err := StringVar(fs, "spatial-database-uri")
+	spatial_database_uri, err := lookup.StringVar(fs, SPATIAL_DATABASE_URI)
 
 	if err != nil {
 		return err
 	}
 
 	if spatial_database_uri == "" {
-		return errors.New("Invalid or missing -spatial-database-uri flag")
+		return fmt.Errorf("Invalid or missing -%s flag", SPATIAL_DATABASE_URI)
 	}
 
-	enable_properties, err := BoolVar(fs, "enable-properties")
+	enable_properties, err := lookup.BoolVar(fs, ENABLE_PROPERTIES)
 
 	if err != nil {
 		return err
@@ -91,15 +71,22 @@ func ValidateCommonFlags(fs *flag.FlagSet) error {
 
 	if enable_properties {
 
-		properties_reader_uri, err := StringVar(fs, "properties-reader-uri")
+		properties_reader_uri, err := lookup.StringVar(fs, PROPERTIES_READER_URI)
 
 		if err != nil {
 			return err
 		}
 
 		if properties_reader_uri == "" {
-			return errors.New("Invalid or missing -properties-reader-uri flag")
+			return fmt.Errorf("Invalid or missing -%s flag", PROPERTIES_READER_URI)
 		}
+
+		_, err = lookup.BoolVar(fs, INDEX_PROPERTIES)
+
+		if err != nil {
+			return err
+		}
+
 	}
 
 	return nil

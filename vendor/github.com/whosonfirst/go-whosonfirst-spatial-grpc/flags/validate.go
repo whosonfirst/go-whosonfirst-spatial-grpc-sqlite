@@ -1,21 +1,43 @@
 package flags
 
 import (
-	"errors"
 	"flag"
-	spatial_flags "github.com/whosonfirst/go-whosonfirst-spatial/flags"
+	"github.com/sfomuseum/go-flags/lookup"
 )
 
-func ValidateServerFlags(fs *flag.FlagSet) error {
+func ValidateGRPCServerFlags(fs *flag.FlagSet) error {
 
-	addr, err := spatial_flags.StringVar(fs, "server-address")
+	var err error
+
+	_, err = lookup.StringVar(fs, HOST)
 
 	if err != nil {
 		return err
 	}
 
-	if addr == "" {
-		return errors.New("Invalid server address")
+	_, err = lookup.IntVar(fs, PORT)
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func ValidateGRPCClientFlags(fs *flag.FlagSet) error {
+
+	var err error
+
+	_, err = lookup.StringVar(fs, HOST)
+
+	if err != nil {
+		return err
+	}
+
+	_, err = lookup.IntVar(fs, PORT)
+
+	if err != nil {
+		return err
 	}
 
 	return nil

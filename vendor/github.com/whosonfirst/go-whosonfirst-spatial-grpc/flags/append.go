@@ -4,9 +4,18 @@ import (
 	"flag"
 )
 
-func AppendServerFlags(fs *flag.FlagSet) error {
+func AppendGRPCServerFlags(fs *flag.FlagSet) error {
 
-	fs.String("server-address", "localhost:8282", "A valid gRPC server address")
+	fs.String(HOST, "localhost", "The host to listen for requests on")
+	fs.Int(PORT, 8082, "The port to listen for requests on")
+
+	return nil
+}
+
+func AppendGRPCClientFlags(fs *flag.FlagSet) error {
+
+	fs.String(HOST, "localhost", "The host to listen for requests on")
+	fs.Int(PORT, 8082, "The port to listen for requests on")
 
 	return nil
 }
