@@ -7,19 +7,24 @@ service Spatial {
 	rpc PointInPolygonStream (PointInPolygonRequest) returns (stream StandardPlaceResponse) {}	
 }
 
+// https://github.com/whosonfirst/go-whosonfirst-flags/blob/main/existential/knownunknown.go
+
 enum ExistentialFlag {
      FALSE = 0;
      TRUE = 1;
      UNKNOWN = -1;     
 }
 
+// https://github.com/whosonfirst/go-whosonfirst-spatial-pip/blob/main/pip.go
+
 message PointInPolygonRequest {
 	float latitude = 1;
 	float longitude = 2;
 }
 
+// https://github.com/whosonfirst/go-whosonfirst-spr/blob/main/spr.go
+
 message StandardPlaceResponse {
-	// int64 wofid = 1;
 	string id = 1;
 	string parent_id = 2;
 	string placetype = 3;
@@ -33,9 +38,19 @@ message StandardPlaceResponse {
 	ExistentialFlag is_ceased = 11;
 	ExistentialFlag is_deprecated = 12;
 	ExistentialFlag is_superseded = 13;
-	ExistentialFlag is_superseding = 14;		
+	ExistentialFlag is_superseding = 14;
+	string inception_date = 15;
+	string cessation_date = 16;	
+	float min_latitude = 17;
+	float min_longitude = 18;
+	float max_latitude = 19;
+	float max_longitude = 20;
+	repeated int64 superseded_by = 21;
+	repeated int64 supersedes = 22;
+	repeated int64 belongs_to = 23;
+	int64 last_modified = 24;
 }
 
 message StandardPlacesResults {
-	repeated StandardPlaceResponse results = 1;
+	repeated StandardPlaceResponse places = 1;
 }
