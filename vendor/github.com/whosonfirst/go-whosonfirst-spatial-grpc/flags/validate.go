@@ -40,5 +40,17 @@ func ValidateGRPCClientFlags(fs *flag.FlagSet) error {
 		return err
 	}
 
+	_, err = lookup.BoolVar(fs, TO_STDOUT)
+
+	if err != nil {
+		return err
+	}
+
+	_, err = lookup.BoolVar(fs, TO_NULL)
+
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
