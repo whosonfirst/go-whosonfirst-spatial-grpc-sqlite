@@ -1,5 +1,7 @@
 syntax = "proto3";
 
+option go_package = "github.com/whosonfirst/go-whosonfirst-spatial-grpc/spatial";
+
 // https://blog.golang.org/protobuf-apiv2
 
 service Spatial {
@@ -20,6 +22,16 @@ enum ExistentialFlag {
 message PointInPolygonRequest {
 	float latitude = 1;
 	float longitude = 2;
+	repeated string placetypes = 3;
+	string geometries = 4;
+	repeated string alternate_geometries = 5;
+	repeated ExistentialFlag is_current = 6;
+	repeated ExistentialFlag is_ceased = 7;
+	repeated ExistentialFlag is_deprecated = 8;
+	repeated ExistentialFlag is_superseding = 9;
+	repeated ExistentialFlag is_superseded = 10;
+	string inception_date = 11;
+	string cessation_date = 12;
 }
 
 // https://github.com/whosonfirst/go-whosonfirst-spr/blob/main/spr.go

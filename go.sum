@@ -60,6 +60,7 @@ github.com/golang/protobuf v1.4.1/go.mod h1:U8fpvMrcmy5pZrNK1lt4xCsGvpyWQ/VVv6QD
 github.com/golang/protobuf v1.4.2/go.mod h1:oDoupMAO8OvCJWAcko0GGGIgR6R6ocIYbsSw735rRwI=
 github.com/golang/protobuf v1.4.3 h1:JjCZWpVbqXDqFVmTfYWEVTMIYrL/NPdPSCHPJ0T/raM=
 github.com/golang/protobuf v1.4.3/go.mod h1:oDoupMAO8OvCJWAcko0GGGIgR6R6ocIYbsSw735rRwI=
+github.com/golang/protobuf v1.5.0 h1:LUVKkCeviFUMKqHa4tXIIij/lbhnMbP7Fn5wKdKkRh4=
 github.com/golang/protobuf v1.5.0/go.mod h1:FsONVRAS9T7sI+LIUmWTfcYkHO4aIWwzhcaSAoJOfIk=
 github.com/golang/protobuf v1.5.1 h1:jAbXjIeW2ZSW2AwFxlGTDoc2CjI2XujLkV3ArsZFCvc=
 github.com/golang/protobuf v1.5.1/go.mod h1:DopwsBzvsk0Fs44TXzsVbJyPhcCPeIwnvohx4u74HPM=
@@ -208,8 +209,12 @@ github.com/whosonfirst/go-whosonfirst-spatial v0.0.55 h1:KzPIlnEOwnA0lPL0icZ2XO2
 github.com/whosonfirst/go-whosonfirst-spatial v0.0.55/go.mod h1:EapRzFWjj2w/vuPoqnQw2rlznIK0I/0t+9uIlf+Ordo=
 github.com/whosonfirst/go-whosonfirst-spatial-grpc v0.0.3 h1:eUqtO/RArgIm1z1Rr180SU3bMeWl5+eCcoX86F0G9Bw=
 github.com/whosonfirst/go-whosonfirst-spatial-grpc v0.0.3/go.mod h1:5sQCKv7WGu38sKqw0OhzgoO/kBCxEnFzjk9DrVBUA5k=
+github.com/whosonfirst/go-whosonfirst-spatial-grpc v0.0.4 h1:mNrepwNnHZdpGIxeZGhQ2Fj6QgZ8twi+ySwHKInKaIw=
+github.com/whosonfirst/go-whosonfirst-spatial-grpc v0.0.4/go.mod h1:j+j+/jIBqN9yitFEZOjLcrf5Iok0ZEoQ3mr+6QRUcx8=
 github.com/whosonfirst/go-whosonfirst-spatial-pip v0.0.9 h1:0ZggEKeoUNfjawBDdUDg4OTEtv0Xn9/ZCs5oaNHLaGc=
 github.com/whosonfirst/go-whosonfirst-spatial-pip v0.0.9/go.mod h1:2xb/TTeO5S+FOynRuzGo8CLNDxaqIA8EACtfx0QwPWM=
+github.com/whosonfirst/go-whosonfirst-spatial-pip v0.0.10 h1:oyEj7BbLT86mgmnFCl71RppsF4uknykgO/JEEsLUl3Y=
+github.com/whosonfirst/go-whosonfirst-spatial-pip v0.0.10/go.mod h1:9N4CAPNrId8ai2mmnokyib+IxduxBlVXPuC1SwOoiiI=
 github.com/whosonfirst/go-whosonfirst-spatial-rtree v0.0.10/go.mod h1:tA3I4X4XyR6Cirq4mflpPeW21oNEkV9zrkrxYwWWIWk=
 github.com/whosonfirst/go-whosonfirst-spatial-rtree v0.0.12/go.mod h1:or04FWtQG9vomX/CnytysyjS9vx4HzB3I7m8zO8p4R4=
 github.com/whosonfirst/go-whosonfirst-spatial-sqlite v0.0.37 h1:wl6d/SUxXZU/dSmMN8LfCdsQG3UNwTj+jDRDs6KXEEA=
