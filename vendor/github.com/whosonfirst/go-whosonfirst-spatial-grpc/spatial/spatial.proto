@@ -32,6 +32,8 @@ message PointInPolygonRequest {
 	repeated ExistentialFlag is_superseded = 10;
 	string inception_date = 11;
 	string cessation_date = 12;
+	repeated string sort = 13;
+	repeated string properties = 14;	
 }
 
 // https://github.com/whosonfirst/go-whosonfirst-spr/blob/main/spr.go

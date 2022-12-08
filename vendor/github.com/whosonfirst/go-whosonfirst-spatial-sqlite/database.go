@@ -5,26 +5,28 @@ package sqlite
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
+	_ "github.com/aaronland/go-sqlite-modernc"
+	"github.com/aaronland/go-sqlite/v2"
 	gocache "github.com/patrickmn/go-cache"
-	"github.com/skelterjohn/geom"
+	"github.com/paulmach/orb"
+	"github.com/paulmach/orb/encoding/wkt"
+	"github.com/paulmach/orb/planar"
 	"github.com/whosonfirst/go-ioutil"
-	wof_geojson "github.com/whosonfirst/go-whosonfirst-geojson-v2"
-	"github.com/whosonfirst/go-whosonfirst-log"
+	"github.com/whosonfirst/go-reader"
 	"github.com/whosonfirst/go-whosonfirst-spatial"
 	"github.com/whosonfirst/go-whosonfirst-spatial/database"
 	"github.com/whosonfirst/go-whosonfirst-spatial/filter"
-	"github.com/whosonfirst/go-whosonfirst-spatial/geo"
 	"github.com/whosonfirst/go-whosonfirst-spatial/timer"
 	"github.com/whosonfirst/go-whosonfirst-spr/v2"
-	"github.com/whosonfirst/go-whosonfirst-sqlite"
-	"github.com/whosonfirst/go-whosonfirst-sqlite-features/tables"
-	sqlite_spr "github.com/whosonfirst/go-whosonfirst-sqlite-spr"
-	sqlite_database "github.com/whosonfirst/go-whosonfirst-sqlite/database"
+	"github.com/whosonfirst/go-whosonfirst-sqlite-features/v2/tables"
+	sqlite_spr "github.com/whosonfirst/go-whosonfirst-sqlite-spr/v2"
 	"github.com/whosonfirst/go-whosonfirst-uri"
+	"github.com/whosonfirst/go-writer/v3"
 	"io"
+	"log"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -33,14 +35,19 @@ import (
 func init() {
 	ctx := context.Background()
 	database.RegisterSpatialDatabase(ctx, "sqlite", NewSQLiteSpatialDatabase)
+	reader.RegisterReader(ctx, "sqlite", NewSQLiteSpatialDatabaseReader)
+	writer.RegisterWriter(ctx, "sqlite", NewSQLiteSpatialDatabaseWriter)
 }
 
+// SQLiteSpatialDatabase is a struct that implements the `database.SpatialDatabase` for performing
+// spatial queries on data stored in a SQLite databases from tables defined by the `whosonfirst/go-whosonfirst-sqlite-features/tables`
+// package.
 type SQLiteSpatialDatabase struct {
 	database.SpatialDatabase
-	Logger        *log.WOFLogger
+	Logger        *log.Logger
 	Timer         *timer.Timer
 	mu            *sync.RWMutex
-	db            *sqlite_database.SQLiteDatabase
+	db            sqlite.Database
 	rtree_table   sqlite.Table
 	spr_table     sqlite.Table
 	geojson_table sqlite.Table
@@ -48,16 +55,19 @@ type SQLiteSpatialDatabase struct {
 	dsn           string
 }
 
+// RTreeSpatialIndex is a struct representing an RTree based spatial index
 type RTreeSpatialIndex struct {
 	geometry  string
-	bounds    geom.Rect
+	bounds    orb.Bound
 	Id        string
 	FeatureId string
-	IsAlt     bool
-	AltLabel  string
+	// A boolean flag indicating whether the feature associated with the index is an alternate geometry.
+	IsAlt bool
+	// The label for the feature (associated with the index) if it is an alternate geometry.
+	AltLabel string
 }
 
-func (sp RTreeSpatialIndex) Bounds() geom.Rect {
+func (sp RTreeSpatialIndex) Bounds() orb.Bound {
 	return sp.bounds
 }
 
@@ -70,21 +80,35 @@ func (sp RTreeSpatialIndex) Path() string {
 	return sp.FeatureId
 }
 
+// SQLiteResults is a struct that implements the `whosonfirst/go-whosonfirst-spr.StandardPlacesResults`
+// interface for rows matching a spatial query.
 type SQLiteResults struct {
 	spr.StandardPlacesResults `json:",omitempty"`
-	Places                    []spr.StandardPlacesResult `json:"places"`
+	// Places is the list of `whosonfirst/go-whosonfirst-spr.StandardPlacesResult` instances returned for a spatial query.
+	Places []spr.StandardPlacesResult `json:"places"`
 }
 
+// Results returns a `whosonfirst/go-whosonfirst-spr.StandardPlacesResults` instance for rows matching a spatial query.
 func (r *SQLiteResults) Results() []spr.StandardPlacesResult {
 	return r.Places
 }
 
+func NewSQLiteSpatialDatabaseReader(ctx context.Context, uri string) (reader.Reader, error) {
+	return NewSQLiteSpatialDatabase(ctx, uri)
+}
+
+func NewSQLiteSpatialDatabaseWriter(ctx context.Context, uri string) (writer.Writer, error) {
+	return NewSQLiteSpatialDatabase(ctx, uri)
+}
+
+// NewSQLiteSpatialDatabase returns a new `whosonfirst/go-whosonfirst-spatial/database.database.SpatialDatabase`
+// instance for performing spatial operations derived from 'uri'.
 func NewSQLiteSpatialDatabase(ctx context.Context, uri string) (database.SpatialDatabase, error) {
 
 	u, err := url.Parse(uri)
 
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Failed to parse URI, %w", err)
 	}
 
 	q := u.Query()
@@ -92,52 +116,55 @@ func NewSQLiteSpatialDatabase(ctx context.Context, uri string) (database.Spatial
 	dsn := q.Get("dsn")
 
 	if dsn == "" {
-		return nil, errors.New("Missing 'dsn' parameter")
+		return nil, fmt.Errorf("Missing 'dsn' parameter")
 	}
 
-	sqlite_db, err := sqlite_database.NewDB(dsn)
+	sqlite_db, err := sqlite.NewDatabase(ctx, dsn)
 
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Failed to create new SQLite database, %w", err)
 	}
 
 	return NewSQLiteSpatialDatabaseWithDatabase(ctx, uri, sqlite_db)
 }
 
-func NewSQLiteSpatialDatabaseWithDatabase(ctx context.Context, uri string, sqlite_db *sqlite_database.SQLiteDatabase) (database.SpatialDatabase, error) {
+// NewSQLiteSpatialDatabaseWithDatabase returns a new `whosonfirst/go-whosonfirst-spatial/database.database.SpatialDatabase`
+// instance for performing spatial operations derived from 'uri' and an existing `aaronland/go-sqlite/database.SQLiteDatabase`
+// instance defined by 'sqlite_db'.
+func NewSQLiteSpatialDatabaseWithDatabase(ctx context.Context, uri string, sqlite_db sqlite.Database) (database.SpatialDatabase, error) {
 
 	u, err := url.Parse(uri)
 
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Failed to parse URI, %w", err)
 	}
 
 	q := u.Query()
 
 	dsn := q.Get("dsn")
 
-	rtree_table, err := tables.NewRTreeTableWithDatabase(sqlite_db)
+	rtree_table, err := tables.NewRTreeTableWithDatabase(ctx, sqlite_db)
 
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Failed to create rtree table, %w", err)
 	}
 
-	spr_table, err := tables.NewSPRTableWithDatabase(sqlite_db)
+	spr_table, err := tables.NewSPRTableWithDatabase(ctx, sqlite_db)
 
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Failed to create spr table, %w", err)
 	}
 
 	// This is so we can satisfy the reader.Reader requirement
 	// in the spatial.SpatialDatabase interface
 
-	geojson_table, err := tables.NewGeoJSONTableWithDatabase(sqlite_db)
+	geojson_table, err := tables.NewGeoJSONTableWithDatabase(ctx, sqlite_db)
 
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Failed to create geojson table, %w", err)
 	}
 
-	logger := log.SimpleWOFLogger("index")
+	logger := log.Default()
 
 	expires := 5 * time.Minute
 	cleanup := 30 * time.Minute
@@ -163,52 +190,112 @@ func NewSQLiteSpatialDatabaseWithDatabase(ctx context.Context, uri string, sqlit
 	return spatial_db, nil
 }
 
+// Disconnect will close the underlying database connection.
 func (r *SQLiteSpatialDatabase) Disconnect(ctx context.Context) error {
-	return r.db.Close()
+	return r.db.Close(ctx)
 }
 
-func (r *SQLiteSpatialDatabase) IndexFeature(ctx context.Context, f wof_geojson.Feature) error {
+// IndexFeature will index a Who's On First GeoJSON Feature record, defined in 'body', in the spatial database.
+func (r *SQLiteSpatialDatabase) IndexFeature(ctx context.Context, body []byte) error {
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	err := r.rtree_table.IndexRecord(r.db, f)
+	err := r.rtree_table.IndexRecord(ctx, r.db, body)
 
 	if err != nil {
-		return err
+		return fmt.Errorf("Failed to index record in rtree table, %w", err)
 	}
 
-	err = r.spr_table.IndexRecord(r.db, f)
+	err = r.spr_table.IndexRecord(ctx, r.db, body)
 
 	if err != nil {
-		return err
+		return fmt.Errorf("Failed to index record in spr table, %w", err)
 	}
 
 	if r.geojson_table != nil {
 
-		err = r.geojson_table.IndexRecord(r.db, f)
+		err = r.geojson_table.IndexRecord(ctx, r.db, body)
 
 		if err != nil {
-			return err
+			return fmt.Errorf("Failed to index record in geojson table, %w", err)
 		}
 	}
 
 	return nil
 }
 
-func (r *SQLiteSpatialDatabase) PointInPolygon(ctx context.Context, coord *geom.Coord, filters ...spatial.Filter) (spr.StandardPlacesResults, error) {
+// RemoveFeature will remove the database record with ID 'id' from the database.
+func (r *SQLiteSpatialDatabase) RemoveFeature(ctx context.Context, str_id string) error {
+
+	id, err := strconv.ParseInt(str_id, 10, 64)
+
+	if err != nil {
+		return fmt.Errorf("Failed to parse string ID '%s', %w", str_id, err)
+	}
+
+	conn, err := r.db.Conn(ctx)
+
+	if err != nil {
+		return fmt.Errorf("Failed to establish database connection, %w", err)
+	}
+
+	tx, err := conn.Begin()
+
+	if err != nil {
+		return fmt.Errorf("Failed to create transaction, %w", err)
+	}
+
+	// defer tx.Rollback()
+
+	tables := []sqlite.Table{
+		r.rtree_table,
+		r.spr_table,
+	}
+
+	if r.geojson_table != nil {
+		tables = append(tables, r.geojson_table)
+	}
+
+	for _, t := range tables {
+
+		var q string
+
+		switch t.Name() {
+		case "rtree":
+			q = fmt.Sprintf("DELETE FROM %s WHERE wof_id = ?", t.Name())
+		default:
+			q = fmt.Sprintf("DELETE FROM %s WHERE id = ?", t.Name())
+		}
+
+		stmt, err := tx.Prepare(q)
+
+		if err != nil {
+			return fmt.Errorf("Failed to create query statement for %s, %w", t.Name(), err)
+		}
+
+		_, err = stmt.ExecContext(ctx, id)
+
+		if err != nil {
+			return fmt.Errorf("Failed execute query statement for %s, %w", t.Name(), err)
+		}
+	}
+
+	err = tx.Commit()
+
+	if err != nil {
+		return fmt.Errorf("Failed to commit transaction, %w", err)
+	}
+
+	return nil
+}
+
+// PointInPolygon will perform a point in polygon query against the database for records that contain 'coord' and
+// that are inclusive of any filters defined by 'filters'.
+func (r *SQLiteSpatialDatabase) PointInPolygon(ctx context.Context, coord *orb.Point, filters ...spatial.Filter) (spr.StandardPlacesResults, error) {
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-
-	/*
-		t1 := time.Now()
-
-		defer func() {
-			golog.Printf("Time to point in polygon, %v\n", time.Since(t1))
-		}()
-
-	*/
 
 	rsp_ch := make(chan spr.StandardPlacesResult)
 	err_ch := make(chan error)
@@ -228,7 +315,7 @@ func (r *SQLiteSpatialDatabase) PointInPolygon(ctx context.Context, coord *geom.
 		case rsp := <-rsp_ch:
 			results = append(results, rsp)
 		case err := <-err_ch:
-			return nil, err
+			return nil, fmt.Errorf("Point in polygon request failed, %w", err)
 		default:
 			// pass
 		}
@@ -238,15 +325,6 @@ func (r *SQLiteSpatialDatabase) PointInPolygon(ctx context.Context, coord *geom.
 		}
 	}
 
-	/*
-		for label, timings := range r.Timer.Timings {
-
-			for _, tm := range timings {
-				golog.Printf("[%s] %s\n", label, tm)
-			}
-		}
-	*/
-
 	spr_results := &SQLiteResults{
 		Places: results,
 	}
@@ -254,7 +332,10 @@ func (r *SQLiteSpatialDatabase) PointInPolygon(ctx context.Context, coord *geom.
 	return spr_results, nil
 }
 
-func (r *SQLiteSpatialDatabase) PointInPolygonWithChannels(ctx context.Context, rsp_ch chan spr.StandardPlacesResult, err_ch chan error, done_ch chan bool, coord *geom.Coord, filters ...spatial.Filter) {
+// PointInPolygonWithChannels will perform a point in polygon query against the database for records that contain 'coord' and
+// that are inclusive of any filters defined by 'filters' emitting results to 'rsp_ch' (for matches), 'err_ch' (for errors) and 'done_ch'
+// (when the query is completed).
+func (r *SQLiteSpatialDatabase) PointInPolygonWithChannels(ctx context.Context, rsp_ch chan spr.StandardPlacesResult, err_ch chan error, done_ch chan bool, coord *orb.Point, filters ...spatial.Filter) {
 
 	defer func() {
 		done_ch <- true
@@ -263,7 +344,7 @@ func (r *SQLiteSpatialDatabase) PointInPolygonWithChannels(ctx context.Context, 
 	rows, err := r.getIntersectsByCoord(ctx, coord, filters...)
 
 	if err != nil {
-		err_ch <- err
+		err_ch <- fmt.Errorf("Get intersects failed, %w", err)
 		return
 	}
 
@@ -271,7 +352,10 @@ func (r *SQLiteSpatialDatabase) PointInPolygonWithChannels(ctx context.Context, 
 	return
 }
 
-func (r *SQLiteSpatialDatabase) PointInPolygonCandidates(ctx context.Context, coord *geom.Coord, filters ...spatial.Filter) ([]*spatial.PointInPolygonCandidate, error) {
+// PointAndPolygonCandidates will perform a point in polygon query against the database for records that contain 'coord' and
+// that are inclusive of any filters defined by 'filters' returning the list of `spatial.PointInPolygonCandidate` candidate bounding
+// boxes that match an initial RTree-based spatial query.
+func (r *SQLiteSpatialDatabase) PointInPolygonCandidates(ctx context.Context, coord *orb.Point, filters ...spatial.Filter) ([]*spatial.PointInPolygonCandidate, error) {
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -294,7 +378,7 @@ func (r *SQLiteSpatialDatabase) PointInPolygonCandidates(ctx context.Context, co
 		case rsp := <-rsp_ch:
 			candidates = append(candidates, rsp)
 		case err := <-err_ch:
-			return nil, err
+			return nil, fmt.Errorf("Point in polygon (candidates) query failed, %w", err)
 		default:
 			// pass
 		}
@@ -307,7 +391,11 @@ func (r *SQLiteSpatialDatabase) PointInPolygonCandidates(ctx context.Context, co
 	return candidates, nil
 }
 
-func (r *SQLiteSpatialDatabase) PointInPolygonCandidatesWithChannels(ctx context.Context, rsp_ch chan *spatial.PointInPolygonCandidate, err_ch chan error, done_ch chan bool, coord *geom.Coord, filters ...spatial.Filter) {
+// PointAndPolygonCandidatesWithChannels will perform a point in polygon query against the database for records that contain 'coord' and
+// that are inclusive of any filters defined by 'filters' returning the list of `spatial.PointInPolygonCandidate` candidate bounding
+// boxes that match an initial RTree-based spatial query emitting results to 'rsp_ch' (for matches), 'err_ch' (for errors) and 'done_ch'
+// (when the query is completed).
+func (r *SQLiteSpatialDatabase) PointInPolygonCandidatesWithChannels(ctx context.Context, rsp_ch chan *spatial.PointInPolygonCandidate, err_ch chan error, done_ch chan bool, coord *orb.Point, filters ...spatial.Filter) {
 
 	defer func() {
 		done_ch <- true
@@ -328,7 +416,7 @@ func (r *SQLiteSpatialDatabase) PointInPolygonCandidatesWithChannels(ctx context
 			Id:        sp.Id,
 			FeatureId: sp.FeatureId,
 			AltLabel:  sp.AltLabel,
-			Bounds:    &bounds,
+			Bounds:    bounds,
 		}
 
 		rsp_ch <- c
@@ -337,40 +425,44 @@ func (r *SQLiteSpatialDatabase) PointInPolygonCandidatesWithChannels(ctx context
 	return
 }
 
-func (r *SQLiteSpatialDatabase) getIntersectsByCoord(ctx context.Context, coord *geom.Coord, filters ...spatial.Filter) ([]*RTreeSpatialIndex, error) {
+// getIntersectsByCoord will return the list of `RTreeSpatialIndex` instances for records that contain 'coord' and are inclusive of any filters
+// defined in 'filters'. This method derives a very small bounding box from 'coord' and then invokes the `getIntersectsByRect` method.
+func (r *SQLiteSpatialDatabase) getIntersectsByCoord(ctx context.Context, coord *orb.Point, filters ...spatial.Filter) ([]*RTreeSpatialIndex, error) {
 
 	// how small can this be?
 
-	offset := geom.Coord{
-		X: 0.00001,
-		Y: 0.00001,
-	}
+	padding := 0.00001
 
-	min := coord.Minus(offset)
-	max := coord.Plus(offset)
+	b := coord.Bound()
+	rect := b.Pad(padding)
 
-	rect := &geom.Rect{
-		Min: min,
-		Max: max,
-	}
-
-	return r.getIntersectsByRect(ctx, rect, filters...)
+	return r.getIntersectsByRect(ctx, &rect, filters...)
 }
 
-func (r *SQLiteSpatialDatabase) getIntersectsByRect(ctx context.Context, rect *geom.Rect, filters ...spatial.Filter) ([]*RTreeSpatialIndex, error) {
+// getIntersectsByCoord will return the list of `RTreeSpatialIndex` instances for records that intersect 'rect' and are inclusive of any filters
+// defined in 'filters'.
+func (r *SQLiteSpatialDatabase) getIntersectsByRect(ctx context.Context, rect *orb.Bound, filters ...spatial.Filter) ([]*RTreeSpatialIndex, error) {
 
-	conn, err := r.db.Conn()
+	conn, err := r.db.Conn(ctx)
 
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Failed to establish database connection, %w", err)
 	}
 
 	q := fmt.Sprintf("SELECT id, wof_id, is_alt, alt_label, geometry, min_x, min_y, max_x, max_y FROM %s  WHERE min_x <= ? AND max_x >= ?  AND min_y <= ? AND max_y >= ?", r.rtree_table.Name())
 
-	rows, err := conn.QueryContext(ctx, q, rect.Min.X, rect.Max.X, rect.Min.Y, rect.Max.Y)
+	// Left returns the left of the bound.
+	// Right returns the right of the bound.
+
+	minx := rect.Left()
+	miny := rect.Bottom()
+	maxx := rect.Right()
+	maxy := rect.Top()
+
+	rows, err := conn.QueryContext(ctx, q, minx, maxx, miny, maxy)
 
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("SQL query failed, %w", err)
 	}
 
 	defer rows.Close()
@@ -392,20 +484,13 @@ func (r *SQLiteSpatialDatabase) getIntersectsByRect(ctx context.Context, rect *g
 		err := rows.Scan(&id, &feature_id, &is_alt, &alt_label, &geometry, &minx, &miny, &maxx, &maxy)
 
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("Result row scan failed, %w", err)
 		}
 
-		min := geom.Coord{
-			X: minx,
-			Y: miny,
-		}
+		min := orb.Point{minx, miny}
+		max := orb.Point{maxx, maxy}
 
-		max := geom.Coord{
-			X: maxx,
-			Y: maxy,
-		}
-
-		rect := geom.Rect{
+		rect := orb.Bound{
 			Min: min,
 			Max: max,
 		}
@@ -428,7 +513,9 @@ func (r *SQLiteSpatialDatabase) getIntersectsByRect(ctx context.Context, rect *g
 	return intersects, nil
 }
 
-func (r *SQLiteSpatialDatabase) inflateResultsWithChannels(ctx context.Context, rsp_ch chan spr.StandardPlacesResult, err_ch chan error, possible []*RTreeSpatialIndex, c *geom.Coord, filters ...spatial.Filter) {
+// inflateResultsWithChannels creates `spr.StandardPlacesResult` instances for each record defined in 'possible' emitting results
+// to 'rsp_ch' (on succcess) and 'err_ch' (if there was an error).
+func (r *SQLiteSpatialDatabase) inflateResultsWithChannels(ctx context.Context, rsp_ch chan spr.StandardPlacesResult, err_ch chan error, possible []*RTreeSpatialIndex, c *orb.Point, filters ...spatial.Filter) {
 
 	seen := make(map[string]bool)
 	mu := new(sync.RWMutex)
@@ -448,7 +535,10 @@ func (r *SQLiteSpatialDatabase) inflateResultsWithChannels(ctx context.Context, 
 	wg.Wait()
 }
 
-func (r *SQLiteSpatialDatabase) inflateSpatialIndexWithChannels(ctx context.Context, rsp_ch chan spr.StandardPlacesResult, err_ch chan error, seen map[string]bool, mu *sync.RWMutex, sp *RTreeSpatialIndex, c *geom.Coord, filters ...spatial.Filter) {
+// inflateSpatialIndexWithChannels creates `spr.StandardPlacesResult` instance for 'sp' applying any filters defined in 'filters'
+// emitting results to 'rsp_ch' (on succcess) and 'err_ch' (if there was an error). If a given record is already found in 'seen' it
+// will be skipped; if not it will be added (to 'seen') once the spatial index has been successfully inflated.
+func (r *SQLiteSpatialDatabase) inflateSpatialIndexWithChannels(ctx context.Context, rsp_ch chan spr.StandardPlacesResult, err_ch chan error, seen map[string]bool, mu *sync.RWMutex, sp *RTreeSpatialIndex, c *orb.Point, filters ...spatial.Filter) {
 
 	select {
 	case <-ctx.Done():
@@ -479,27 +569,34 @@ func (r *SQLiteSpatialDatabase) inflateSpatialIndexWithChannels(ctx context.Cont
 
 	t2 := time.Now()
 
-	// this needs to be sped up (20201216/thisisaaronland)
+	// START OF maybe move all this code in to whosonfirst/go-whosonfirst-sqlite-features/tables/rtree.go
 
-	var coords [][][]float64
+	var poly orb.Polygon
+	var err error
 
-	err := json.Unmarshal([]byte(sp.geometry), &coords)
+	// This is to account for version of the whosonfirst/go-whosonfirst-sqlite-features
+	// package < 0.10.0 that stored geometries as JSON-encoded strings. Subsequent versions
+	// use WKT encoding.
+
+	if strings.HasPrefix(sp.geometry, "[[[") {
+		// Investigate https://github.com/paulmach/orb/tree/master/geojson#performance
+		err = json.Unmarshal([]byte(sp.geometry), &poly)
+	} else {
+		poly, err = wkt.UnmarshalPolygon(sp.geometry)
+	}
+
+	// END OF maybe move all this code in to whosonfirst/go-whosonfirst-sqlite-features/tables/rtree.go
 
 	r.Timer.Add(ctx, sp_id, "time to unmarshal geometry", time.Since(t2))
 
 	if err != nil {
-		err_ch <- err
-		return
-	}
-
-	if len(coords) == 0 {
-		err_ch <- errors.New("Missing coordinates for polygon")
+		err_ch <- fmt.Errorf("Failed to unmarshal geometry, %w", err)
 		return
 	}
 
 	t3 := time.Now()
 
-	if !geo.PolygonContainsCoord(coords, c) {
+	if !planar.PolygonContains(poly, *c) {
 		return
 	}
 
@@ -511,22 +608,30 @@ func (r *SQLiteSpatialDatabase) inflateSpatialIndexWithChannels(ctx context.Cont
 	// ID
 
 	mu.Lock()
+	defer mu.Unlock()
+
+	// Check to see whether seen[feature_id] has been assigned by another process
+	// while waiting for mu to become available
+
+	if seen[feature_id] {
+		return
+	}
+
 	seen[feature_id] = true
-	mu.Unlock()
 
 	t4 := time.Now()
 
 	s, err := r.retrieveSPR(ctx, sp.Path())
 
 	if err != nil {
-		r.Logger.Error("Failed to retrieve feature cache for %s, %v", sp_id, err)
+		r.Logger.Printf("Failed to retrieve feature cache for %s, %v", sp_id, err)
 		return
 	}
 
 	r.Timer.Add(ctx, sp_id, "time to retrieve SPR", time.Since(t4))
 
 	if err != nil {
-		r.Logger.Error("Failed to retrieve feature cache for %s, %v", sp_id, err)
+		r.Logger.Printf("Failed to retrieve feature cache for %s, %v", sp_id, err)
 		return
 	}
 
@@ -537,7 +642,7 @@ func (r *SQLiteSpatialDatabase) inflateSpatialIndexWithChannels(ctx context.Cont
 		err = filter.FilterSPR(f, s)
 
 		if err != nil {
-			r.Logger.Debug("SKIP %s because filter error %s", sp_id, err)
+			// r.Logger.Printf("SKIP %s because filter error %s", sp_id, err)
 			return
 		}
 	}
@@ -547,6 +652,7 @@ func (r *SQLiteSpatialDatabase) inflateSpatialIndexWithChannels(ctx context.Cont
 	rsp_ch <- s
 }
 
+// retrieveSPR retrieves a `spr.StandardPlacesResult` instance from the local database cache identified by 'uri_str'.
 func (r *SQLiteSpatialDatabase) retrieveSPR(ctx context.Context, uri_str string) (spr.StandardPlacesResult, error) {
 
 	c, ok := r.gocache.Get(uri_str)
@@ -584,8 +690,8 @@ func (r *SQLiteSpatialDatabase) retrieveSPR(ctx context.Context, uri_str string)
 	return s, nil
 }
 
-// whosonfirst/go-reader interface
-
+// Read implements the whosonfirst/go-reader interface so that the database itself can be used as a
+// reader.Reader instance (reading features from the `geojson` table.
 func (r *SQLiteSpatialDatabase) Read(ctx context.Context, str_uri string) (io.ReadSeekCloser, error) {
 
 	id, _, err := uri.ParseURI(str_uri)
@@ -594,7 +700,7 @@ func (r *SQLiteSpatialDatabase) Read(ctx context.Context, str_uri string) (io.Re
 		return nil, err
 	}
 
-	conn, err := r.db.Conn()
+	conn, err := r.db.Conn(ctx)
 
 	if err != nil {
 		return nil, err
@@ -624,20 +730,51 @@ func (r *SQLiteSpatialDatabase) Read(ctx context.Context, str_uri string) (io.Re
 	return fh, nil
 }
 
+// ReadURI implements the whosonfirst/go-reader interface so that the database itself can be used as a
+// reader.Reader instance
 func (r *SQLiteSpatialDatabase) ReaderURI(ctx context.Context, str_uri string) string {
 	return str_uri
 }
 
-// whosonfirst/go-writer interface
-
+// Write implements the whosonfirst/go-writer interface so that the database itself can be used as a
+// writer.Writer instance (by invoking the `IndexFeature` method).
 func (r *SQLiteSpatialDatabase) Write(ctx context.Context, key string, fh io.ReadSeeker) (int64, error) {
-	return 0, fmt.Errorf("Not implemented")
+
+	body, err := io.ReadAll(fh)
+
+	if err != nil {
+		return 0, err
+	}
+
+	err = r.IndexFeature(ctx, body)
+
+	if err != nil {
+		return 0, err
+	}
+
+	return int64(len(body)), nil
 }
 
+// WriterURI implements the whosonfirst/go-writer interface so that the database itself can be used as a
+// writer.Writer instance
 func (r *SQLiteSpatialDatabase) WriterURI(ctx context.Context, str_uri string) string {
 	return str_uri
 }
 
+// Flush implements the whosonfirst/go-writer interface so that the database itself can be used as a
+// writer.Writer instance. This method is a no-op and simply returns `nil`.
+func (r *SQLiteSpatialDatabase) Flush(ctx context.Context) error {
+	return nil
+}
+
+// Close implements the whosonfirst/go-writer interface so that the database itself can be used as a
+// writer.Writer instance. This method is a no-op and simply returns `nil`.
 func (r *SQLiteSpatialDatabase) Close(ctx context.Context) error {
+	return nil
+}
+
+// SetLogger implements the whosonfirst/go-writer interface so that the database itself can be used as a
+// writer.Writer instance. This method is a no-op and simply returns `nil`.
+func (r *SQLiteSpatialDatabase) SetLogger(ctx context.Context, logger *log.Logger) error {
 	return nil
 }
