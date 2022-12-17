@@ -3,8 +3,8 @@ module github.com/whosonfirst/go-whosonfirst-grpc-sqlite
 go 1.18
 
 require (
-	github.com/whosonfirst/go-whosonfirst-spatial-grpc v0.0.9
-	github.com/whosonfirst/go-whosonfirst-spatial-sqlite v0.6.0
+	github.com/whosonfirst/go-whosonfirst-spatial-grpc v0.0.10
+	github.com/whosonfirst/go-whosonfirst-spatial-sqlite v0.6.4
 )
 
 require (
@@ -45,8 +45,8 @@ require (
 	github.com/whosonfirst/go-whosonfirst-names v0.1.0 // indirect
 	github.com/whosonfirst/go-whosonfirst-placetypes v0.4.2 // indirect
 	github.com/whosonfirst/go-whosonfirst-sources v0.1.0 // indirect
-	github.com/whosonfirst/go-whosonfirst-spatial v0.5.3 // indirect
-	github.com/whosonfirst/go-whosonfirst-spatial-pip v0.3.1 // indirect
+	github.com/whosonfirst/go-whosonfirst-spatial v0.5.4 // indirect
+	github.com/whosonfirst/go-whosonfirst-spatial-pip v0.3.2 // indirect
 	github.com/whosonfirst/go-whosonfirst-spr/v2 v2.3.3 // indirect
 	github.com/whosonfirst/go-whosonfirst-sqlite-features/v2 v2.0.0 // indirect
 	github.com/whosonfirst/go-whosonfirst-sqlite-spr/v2 v2.0.0 // indirect
