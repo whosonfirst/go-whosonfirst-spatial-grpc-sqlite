@@ -1,10 +1,8 @@
 package request
 
 import (
-	"flag"
-	"fmt"
 	"github.com/whosonfirst/go-whosonfirst-spatial-grpc/spatial"
-	"github.com/whosonfirst/go-whosonfirst-spatial-pip"
+	"github.com/whosonfirst/go-whosonfirst-spatial/pip"
 )
 
 func PIPRequestFromSpatialRequest(spatial_req *spatial.PointInPolygonRequest) *pip.PointInPolygonRequest {
@@ -46,17 +44,6 @@ func PIPRequestFromSpatialRequest(spatial_req *spatial.PointInPolygonRequest) *p
 	}
 
 	return pip_req
-}
-
-func NewPointInPolygonRequestFromFlagSet(fs *flag.FlagSet) (*spatial.PointInPolygonRequest, error) {
-
-	pip_req, err := pip.NewPointInPolygonRequestFromFlagSet(fs)
-
-	if err != nil {
-		return nil, fmt.Errorf("Failed to create request from flagset, %w", err)
-	}
-
-	return NewPointInPolygonRequest(pip_req)
 }
 
 // https://github.com/whosonfirst/go-whosonfirst-spatial-pip/blob/main/pip.go
