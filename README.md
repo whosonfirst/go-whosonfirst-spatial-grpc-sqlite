@@ -2,6 +2,10 @@
 
 SQLite support for the gRPC implementation of the `go-whosonfirst-spatial` interfaces.
 
+## Important
+
+This package has been deprecated. All its functionality has been moved in to [whosonfirst/go-whosonfirst-spatial-sqlite](https://github.com/whosonfirst/go-whosonfirst-spatial-sqlite).
+
 ## Documentation
 
 Documentation is incomplete at this time.
